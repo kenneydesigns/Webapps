@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CVMA 30-1 Bookkeeper (FY Jul→Jun, with Data Import/Export)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    @media print {
+      .no-print { display: none !important; }
+      .print\:block { display: block !important; }
+    }
+    th.sorted-asc::after { content: " \2191"; font-weight: normal; }
+    th.sorted-desc::after { content: " \2193"; font-weight: normal; }
+
+    html, body { min-height: 100%; height: auto; overflow-y: auto; }
+    .tab-panel { overflow: visible; }
+    #tab-reports { overflow: visible; }
+    @media screen {
+      .overflow-x-auto { overflow-x: auto; overflow-y: visible; }
+    }
+    @media print {
+      .overflow-x-auto { overflow: visible !important; }
+      .tab-panel { overflow: visible !important; }
+      thead { display: table-header-group; }
+      tfoot { display: table-footer-group; }
+      table { page-break-inside: auto; }
+      tr, td, th { page-break-inside: avoid; }
+    }
+  
+    .withdrawal-col { padding-right: 2rem; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="min-h-screen max-w-7xl mx-auto p-4 pb-24 space-y-4">
+    <header class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold">CVMA Bookkeeper</h1>
+        <p class="text-sm text-slate-600">FY <strong>Jul→Jun</strong>. QuickBooks-style tracker for events, earmarks, and bank reconciliation.</p>
+      </div>
+      <div class="no-print flex items-center gap-2 flex-wrap justify-end">
+        <button id="btnExport" class="px-3 py-2 rounded-xl bg-black text-white hover:opacity-90">Export Excel</button>
+        <button id="btnPrint" class="px-3 py-2 rounded-xl border border-slate-300 hover:bg-white">Print</button>
+        <button id="btnExportJSON" class="px-3 py-2 rounded-xl border border-slate-300">Export JSON</button>
+        <label class="px-3 py-2 rounded-xl border border-slate-300 cursor-pointer">
+          Import JSON
+          <input id="importJsonFile" type="file" accept="application/json" class="hidden">
+        </label>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="no-print flex gap-2 border-b border-slate-200 pb-2">
+      <button data-tab="dashboard" class="tab active px-3 py-2 rounded-t-xl bg-white border border-b-0">Dashboard</button>
+      <button data-tab="events" class="tab px-3 py-2 rounded-t-xl bg-slate-100 border border-b-0">Events</button>
+      <button data-tab="transactions" class="tab px-3 py-2 rounded-t-xl bg-slate-100 border border-b-0">Transactions</button>
+      <button data-tab="earmarks" class="tab px-3 py-2 rounded-t-xl bg-slate-100 border border-b-0">Earmarked Funds</button>
+      <button data-tab="bank" class="tab px-3 py-2 rounded-t-xl bg-slate-100 border border-b-0">Bank Import</button>
+      <button data-tab="reports" class="tab px-3 py-2 rounded-t-xl bg-slate-100 border border-b-0">Reports</button>
+      <div class="ml-auto flex items-center gap-2">
+        <label class="text-sm">Fiscal Year</label>
+        <input id="fyInput" type="number" class="w-24 px-2 py-1 border rounded-lg" />
+        <button id="saveAll" class="px-3 py-1 border rounded-lg">Save</button>
+        <button id="loadAll" class="px-3 py-1 border rounded-lg">Load</button>
+        <button id="clearAll" class="px-3 py-1 border rounded-lg">Reset</button>
+      </div>
+    </nav>
+
+    <!-- Dashboard -->
+    <section id="tab-dashboard" class="tab-panel bg-white rounded-2xl shadow p-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="p-4 rounded-xl border">
+          <div class="text-sm text-slate-500">Events</div>
+          <div id="kpiEvents" class="text-2xl font-semibold">0</div>
+        </div>
+        <div class="p-4 rounded-xl border">
+          <div class="text-sm text-slate-500">Transactions</div>
+          <div id="kpiTxns" class="text-2xl font-semibold">0</div>
+        </div>
+        <div class="p-4 rounded-xl border">
+          <div class="text-sm text-slate-500">Income (FY Jul→Jun)</div>
+          <div id="kpiIncome" class="text-2xl font-semibold">$0.00</div>
+        </div>
+        <div class="p-4 rounded-xl border">
+          <div class="text-sm text-slate-500">Costs (FY Jul→Jun)</div>
+          <div id="kpiCosts" class="text-2xl font-semibold">$0.00</div>
+        </div>
+      </div>
+      <div class="mt-6">
+        <h2 class="text-lg font-semibold mb-2">This Fiscal Year by Month (Jul→Jun)</h2>
+        <div id="byMonth" class="grid grid-cols-2 md:grid-cols-6 gap-2"></div>
+      
+      <div class="mt-6">
+        <h2 class="text-lg font-semibold mb-2">By Account (FY Jul→Jun)</h2>
+        <div id="byAccount" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2"></div>
+      </div>
+</div>
+      <div class="mt-4 text-xs text-slate-500 no-print">
+        Tip: Opening this FY Jul→Jun file will automatically try to load your saved data from the previous version (<code>cvma_bookkeeper_v1</code>) if you had clicked “Save” before.
+        If not, open the old file, click “Save,” then return here and click “Load.” You can also use Export/Import JSON above.
+      </div>
+    </section>
+
+    <!-- Events -->
+    <section id="tab-events" class="hidden tab-panel bg-white rounded-2xl shadow p-4 space-y-4">
+      <form id="eventForm" class="grid grid-cols-1 md:grid-cols-6 gap-3">
+        <input required name="name" placeholder="Event name" class="md:col-span-2 px-3 py-2 border rounded-lg" />
+        <input name="type" placeholder="Type (e.g., Poker Run)" class="px-3 py-2 border rounded-lg" />
+        <input name="date" type="date" class="px-3 py-2 border rounded-lg" />
+        <input name="notes" placeholder="Notes" class="md:col-span-2 px-3 py-2 border rounded-lg" />
+        <button class="px-3 py-2 rounded-lg bg-black text-white">Add Event</button>
+      </form>
+      <div class="flex items-center gap-3">
+        <input id="eventFile" type="file" accept=".csv" class="px-3 py-2 border rounded-lg" />
+        <button id="parseEvents" class="px-3 py-2 rounded-lg border">Import Events CSV</button>
+      </div>
+      <p class="text-xs text-slate-500">CSV columns expected: Name, Type, Date (YYYY-MM-DD or M/D/YYYY), Notes.</p>
+
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left border-b">
+            <th class="py-2">Name</th><th>Type</th><th>Date</th><th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="eventsTbody"></tbody>
+      </table>
+    </section>
+
+    <!-- Transactions -->
+    <section id="tab-transactions" class="hidden tab-panel bg-white rounded-2xl shadow p-4 space-y-4">
+      <form id="txnForm" class="grid grid-cols-1 md:grid-cols-8 gap-3">
+        <input name="date" type="date" required class="px-3 py-2 border rounded-lg" />
+        <input name="desc" placeholder="Description" class="md:col-span-2 px-3 py-2 border rounded-lg" />
+        <select name="kind" class="px-3 py-2 border rounded-lg">
+          <option value="INCOME">INCOME</option>
+          <option value="COST">COST</option>
+        </select>
+        <input name="amount" type="number" step="0.01" placeholder="Amount" class="px-3 py-2 border rounded-lg" />
+        
+        <select name="account" class="px-3 py-2 border rounded-lg">
+          <option value="Checking">Checking</option>
+          <option value="Savings">Savings</option>
+          <option value="Venmo">Venmo</option>
+          <option value="PayPal">PayPal</option>
+        </select>
+        <select name="eventId" class="px-3 py-2 border rounded-lg"></select>
+        <select name="earmarkId" class="px-3 py-2 border rounded-lg"></select>
+        <input name="category" placeholder="Category" class="px-3 py-2 border rounded-lg" />
+        <button class="px-3 py-2 rounded-lg bg-black text-white">Add</button>
+      </form>
+      
+      <div class="flex items-center gap-3">
+        <label class="text-sm">Filter Account</label>
+        <select id="acctFilter" class="px-2 py-1 border rounded">
+          <option value="">All</option>
+          <option value="Checking">Checking</option>
+          <option value="Savings">Savings</option>
+          <option value="Venmo">Venmo</option>
+          <option value="PayPal">PayPal</option>
+        </select>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left border-b">
+              <th class="py-2">Date</th><th>Description</th><th>Deposit</th><th class="withdrawal-col">Withdrawal</th><th>Event</th><th>Earmark</th><th>Category</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="txnsTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Earmarks -->
+    <section id="tab-earmarks" class="hidden tab-panel bg-white rounded-2xl shadow p-4 space-y-4">
+      <form id="earmarkForm" class="grid grid-cols-1 md:grid-cols-8 gap-3">
+        <input name="name" placeholder="Earmark name (e.g., Senior Living Gift Bags)" class="md:col-span-2 px-3 py-2 border rounded-lg" />
+        <input name="month" type="number" min="1" max="12" placeholder="Month" class="px-3 py-2 border rounded-lg" />
+        <input name="year" type="number" placeholder="Year" class="px-3 py-2 border rounded-lg" />
+        <input name="notes" placeholder="Notes" class="md:col-span-3 px-3 py-2 border rounded-lg" />
+        <button class="px-3 py-2 rounded-lg bg-black text-white">Add Earmark</button>
+      </form>
+      <div class="flex items-center gap-3">
+        <input id="earmarkFile" type="file" accept=".csv" class="px-3 py-2 border rounded-lg" />
+        <button id="parseEarmarks" class="px-3 py-2 rounded-lg border">Import Earmarks CSV</button>
+      </div>
+      <p class="text-xs text-slate-500">CSV columns expected: Name, Month (1-12 or Jan..Dec), Year (YYYY), Notes.</p>
+
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left border-b">
+            <th class="py-2">Name</th><th>Month</th><th>Year</th><th>Balance</th><th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="earmarksTbody"></tbody>
+      </table>
+      <p class="text-xs text-slate-500">Balances are computed from transactions tagged to each earmark (earmarked income increases balance; costs decrease it).</p>
+    </section>
+
+    <!-- Bank Import -->
+    <section id="tab-bank" class="hidden tab-panel bg-white rounded-2xl shadow p-4 space-y-4">
+      <div class="flex items-center gap-3">
+        <input id="bankFile" type="file" accept=".csv" class="px-3 py-2 border rounded-lg" />
+        <button id="parseBank" class="px-3 py-2 rounded-lg border">Parse CSV</button>
+      </div>
+      <p class="text-xs text-slate-500">CSV columns expected: Date, Description, Amount (or separate Debit/Credit). Amount may be negative for costs.</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left border-b">
+              <th class="py-2">Date</th><th>Description</th><th>Amount</th><th>Assign Event</th><th>Assign Account</th><th>Assign Type</th><th>Commit</th>
+            </tr>
+          </thead>
+          <tbody id="bankTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Reports -->
+    <section id="tab-reports" class="hidden tab-panel bg-white rounded-2xl shadow p-4 space-y-6 pb-8">
+      <div>
+        <h3 class="text-lg font-semibold mb-2">Profitability by Event (FY)</h3>
+        <div id="reportEvents" class="overflow-x-auto"></div>
+      </div>
+      <div>
+        <h3 class="text-lg font-semibold mb-2">Earmarks Balance</h3>
+        <div id="reportEarmarks" class="overflow-x-auto"></div>
+      </div>
+      <div>
+        <h3 class="text-lg font-semibold mb-2">Funds Committed (Earmarked & Spent)</h3>
+        <div id="reportCommitted" class="overflow-x-auto"></div>
+      </div>
+    </section>
+  </div>
+
+<script>
+/* ========= State ========= */
+const DateTime = luxon.DateTime;
+const LS_KEY = "cvma_bookkeeper_v1";
+
+let state = {
+  fiscalYear: new Date().getFullYear(),
+  events: [],        // {id, name, type, date, notes}
+  transactions: [],  // {id, date, kind: INCOME|COST, amount, desc, eventId, earmarkId, category}
+  earmarks: [],      // {id, name, notes}
+  bankQueue: [],      // parsed bank lines awaiting commit
+  filterAccount: ""   // current account filter for transactions
+};
+
+function uid() { return Math.random().toString(36).slice(2, 10); }
+
+function save(manual=true) {
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  if (manual) alert("Saved.");
+}
+function autosave() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+
+function load(showAlert=true) {
+  const raw = localStorage.getItem(LS_KEY);
+  if (!raw) { if (showAlert) alert("Nothing saved yet."); return false; }
+  try {
+    const obj = JSON.parse(raw);
+    state = obj;
+    state.fiscalYear = Number(state.fiscalYear) || new Date().getFullYear();
+    renderAll();
+    return true;
+  } catch (e) {
+    if (showAlert) alert("Saved data was corrupt.");
+    return false;
+  }
+}
+function resetAll() {
+  if (!confirm("Reset all data?")) return;
+  state = { fiscalYear: new Date().getFullYear(), events: [], transactions: [], earmarks: [], bankQueue: [] };
+  renderAll();
+  autosave();
+}
+
+/* ========= Helpers ========= */
+function money(n){ return (Number(n)||0).toLocaleString(undefined, {style:"currency", currency:"USD"}); }
+
+// FY runs July 1 (fy) through June 30 (fy+1). End is exclusive at next July 1.
+function fyRange(fy){
+  const start = DateTime.fromObject({year:Number(fy), month:7, day:1});
+  const end   = start.plus({years:1});
+  return {start, end};
+}
+function inFY(dtStr, fy){
+  const dt = DateTime.fromISO(dtStr);
+  if (!dt.isValid) return false;
+  const {start, end} = fyRange(fy);
+  return (dt >= start && dt < end);
+}
+// 0..11 where 0=Jul ... 11=Jun
+function fyMonthIndex(dtStr){
+  const dt = DateTime.fromISO(dtStr);
+  if (!dt.isValid) return null;
+  const m = dt.month;
+  const map = {7:0,8:1,9:2,10:3,11:4,12:5,1:6,2:7,3:8,4:9,5:10,6:11};
+  return map[m] ?? null;
+}
+
+function byId(list, id){ return list.find(x => x.id === id); }
+function nameOfEvent(id){ const e = byId(state.events, id); return e ? e.name : ""; }
+function nameOfEarmark(id){ const e = byId(state.earmarks, id); return e ? e.name : ""; }
+
+/* ========= Rendering ========= */
+function renderAll(){
+  document.getElementById("fyInput").value = state.fiscalYear;
+
+  const evSel = document.querySelector('#txnForm select[name="eventId"]');
+  const earmSel = document.querySelector('#txnForm select[name="earmarkId"]');
+  evSel.innerHTML = '<option value="">(no event)</option>' + state.events.map(e => `<option value="${e.id}">${e.name}</option>`).join("");
+  earmSel.innerHTML = '<option value="">(no earmark)</option>' + state.earmarks.map(e => `<option value="${e.id}">${e.name}</option>`).join("");
+  // Populate Account filter options
+  const acctFilter = document.getElementById("acctFilter");
+  if (acctFilter){
+    const baseAccounts = ["Checking","Savings","Venmo","PayPal"];
+    const observed = Array.from(new Set(state.transactions.map(t => t.account).filter(Boolean)));
+    const accounts = Array.from(new Set(["", ...baseAccounts, ...observed]));
+    acctFilter.innerHTML = accounts.map(ac => ac
+      ? `<option value="${ac}">${ac}</option>`
+      : `<option value="">All</option>`).join("");
+    acctFilter.value = state.filterAccount || "";
+  }
+
+
+  const tbody = document.getElementById("eventsTbody");
+  tbody.innerHTML = state.events.map(e => `
+    <tr class="border-b">
+      <td class="py-2">${e.name}</td>
+      <td>${e.type||""}</td>
+      <td>${e.date||""}</td>
+      <td>${e.notes||""}</td>
+      <td>
+        <div class="flex items-center gap-3">
+          <button data-id="${e.id}" class="edit-event-note text-blue-600">Edit Notes</button>
+          <button data-id="${e.id}" class="del-event text-red-600">Delete</button>
+        </div>
+      </td>
+    </tr>`).join("");
+
+  const ttbody = document.getElementById("txnsTbody");
+  
+
+ttbody.innerHTML = state.transactions
+    .filter(t => !state.filterAccount || t.account === state.filterAccount)
+    .sort((a,b)=> {
+      const da = DateTime.fromISO(a.date || "");
+      const db = DateTime.fromISO(b.date || "");
+      if (!da.isValid && !db.isValid) return 0;
+      if (!da.isValid) return 1;
+      if (!db.isValid) return -1;
+      return da.toMillis() - db.toMillis();
+    })
+    .map(t => `
+      <tr class="border-b" data-rowid="${t.id}">
+        <td class="py-2">${t.date||""}</td>
+        <td>${t.desc||""}</td>
+        <td>${t.kind==="INCOME" ? money(t.amount) : ""}</td>
+        <td class="withdrawal-col">${t.kind==="COST" ? money(t.amount) : ""}</td>
+        <td>${nameOfEvent(t.eventId)||""}</td>
+        <td>${nameOfEarmark(t.earmarkId)||""}</td>
+        <td>${t.category||""}</td>
+        <td class="whitespace-nowrap flex gap-3 py-2">
+          <button data-id="${t.id}" class="edit-txn text-blue-600">Edit</button>
+          <button data-id="${t.id}" class="del-txn text-red-600">Delete</button>
+        </td>
+      </tr>`).join("");
+
+
+
+  const etbody = document.getElementById("earmarksTbody");
+  etbody.innerHTML = state.earmarks.map(e => {
+    const bal = state.transactions.reduce((sum,t)=>{
+      if (t.earmarkId !== e.id) return sum;
+      return sum + (t.kind === "INCOME" ? Number(t.amount||0) : -Number(t.amount||0));
+    }, 0);
+    return `<tr class="border-b">
+      <td class="py-2">${e.name}</td>
+      <td>${e.month||""}</td>
+      <td>${e.year||""}</td>
+      <td>${money(bal)}</td>
+      <td>${e.notes||""}</td>
+      <td>
+        <div class="flex items-center gap-3">
+          <button data-id="${e.id}" class="edit-earmark-note text-blue-600">Edit Notes</button>
+          <button data-id="${e.id}" class="del-earmark text-red-600">Delete</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  const monthBox = document.getElementById("byMonth");
+  const months = ["Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May","Jun"];
+  monthBox.innerHTML = months.map((m,i)=>{
+    const inc = state.transactions.filter(t=>inFY(t.date,state.fiscalYear) && fyMonthIndex(t.date)===i && t.kind==="INCOME").reduce((a,b)=>a+Number(b.amount||0),0);
+    const cost = state.transactions.filter(t=>inFY(t.date,state.fiscalYear) && fyMonthIndex(t.date)===i && t.kind==="COST").reduce((a,b)=>a+Number(b.amount||0),0);
+    return `<div class="p-3 border rounded-xl">
+      <div class="text-sm text-slate-500">${months[i]}</div>
+      <div class="text-xs">Income ${money(inc)}</div>
+      <div class="text-xs">Costs ${money(cost)}</div>
+      <div class="text-xs font-semibold">Net ${money(inc-cost)}</div>
+    </div>`;
+  }).join("");
+
+  
+  // === Update KPI cards ===
+  const fy = Number(state.fiscalYear);
+  const incomeFY = state.transactions
+    .filter(t => inFY(t.date, fy) && t.kind === "INCOME")
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const costsFY = state.transactions
+    .filter(t => inFY(t.date, fy) && t.kind === "COST")
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+  const kpiIncEl = document.getElementById("kpiIncome");
+  const kpiCostEl = document.getElementById("kpiCosts");
+  const kpiTxnsEl = document.getElementById("kpiTxns");
+  const kpiEventsEl = document.getElementById("kpiEvents");
+  if (kpiIncEl) kpiIncEl.textContent = money(incomeFY);
+  if (kpiCostEl) kpiCostEl.textContent = money(costsFY);
+  if (kpiTxnsEl) kpiTxnsEl.textContent = String(state.transactions.length);
+  if (kpiEventsEl) kpiEventsEl.textContent = String(state.events.length);
+renderReportEvents();
+  renderReportEarmarks();
+  
+  // === By Account (FY) ===
+  const acctBox = document.getElementById("byAccount");
+  if (acctBox) {
+    const fy = Number(state.fiscalYear);
+    const baseAccounts = ["Checking","Savings","Venmo","PayPal"];
+    const observed = Array.from(new Set(state.transactions.map(t => t.account).filter(Boolean)));
+    const accounts = Array.from(new Set([...baseAccounts, ...observed]));
+    acctBox.innerHTML = accounts.map(ac => {
+      const inc = state.transactions.filter(t => t.account===ac && inFY(t.date, fy) && t.kind==="INCOME")
+        .reduce((s,t)=> s + Number(t.amount||0), 0);
+      const out = state.transactions.filter(t => t.account===ac && inFY(t.date, fy) && t.kind==="COST")
+        .reduce((s,t)=> s + Number(t.amount||0), 0);
+      const net = inc - out;
+      return `<div class="p-3 border rounded-xl">
+        <div class="text-sm text-slate-500">${ac}</div>
+        <div class="text-xs">Deposits ${money(inc)}</div>
+        <div class="text-xs">Withdrawals ${money(out)}</div>
+        <div class="text-xs font-semibold">Net ${money(net)}</div>
+      </div>`;
+    }).join("");
+  }
+renderReportCommitted();
+  makeTablesSortable();
+  autosave(); // autosave after every render
+}
+
+function renderReportEvents(){
+  const fy = Number(state.fiscalYear);
+  const byEvent = {};
+  for (const t of state.transactions) {
+    if (!inFY(t.date, fy)) continue;
+    const eName = t.eventId ? nameOfEvent(t.eventId) : "(No Event)";
+    if (!byEvent[eName]) byEvent[eName] = {income:0, cost:0, rows:[]};
+    if (t.kind==="INCOME") byEvent[eName].income += Number(t.amount||0);
+    else byEvent[eName].cost += Number(t.amount||0);
+    byEvent[eName].rows.push(t);
+  }
+  const events = Object.keys(byEvent).sort();
+  const table = [`<table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Event</th><th>Income</th><th>Costs</th><th>Net</th></tr></thead><tbody>`,
+    ...events.map(name=>{
+      const e = byEvent[name];
+      const net = e.income - e.cost;
+      return `<tr class="border-b"><td class="py-2">${name}</td><td>${money(e.income)}</td><td>${money(e.cost)}</td><td>${money(net)}</td></tr>`;
+    }),
+    `</tbody></table>`];
+  document.getElementById("reportEvents").innerHTML = table.join("");
+}
+
+function renderReportEarmarks(){
+  const byEM = {};
+  for (const t of state.transactions) {
+    if (!t.earmarkId) continue;
+    if (!byEM[t.earmarkId]) byEM[t.earmarkId] = {name: nameOfEarmark(t.earmarkId), in:0, out:0};
+    if (t.kind==="INCOME") byEM[t.earmarkId].in += Number(t.amount||0);
+    else byEM[t.earmarkId].out += Number(t.amount||0);
+  }
+  const rows = Object.values(byEM).map(e=>`<tr class="border-b"><td class="py-2">${e.name}</td><td>${money(e.in)}</td><td>${money(e.out)}</td><td>${money(e.in-e.out)}</td></tr>`).join("");
+  document.getElementById("reportEarmarks").innerHTML =
+    `<table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Earmark</th><th>Inbound</th><th>Outbound</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderReportCommitted(){
+  const fy = Number(state.fiscalYear);
+  const rows = state.transactions
+    .filter(t => inFY(t.date, fy) && (t.earmarkId || t.eventId))
+    .map(t => {
+      const earmarkName = t.earmarkId ? nameOfEarmark(t.earmarkId) : "(No Earmark)";
+      const eventName = t.eventId ? nameOfEvent(t.eventId) : "(No Event)";
+      const type = t.kind === "INCOME" ? "Inbound" : "Outbound";
+      return `<tr class="border-b">
+        <td class="py-2">${t.date || ""}</td>
+        <td>${earmarkName}</td>
+        <td>${eventName}</td>
+        <td>${t.account || "(Unspecified)"}</td>
+        <td>${type}</td>
+        <td>${money(t.amount)}</td>
+        <td>${t.desc || ""}</td>
+      </tr>`;
+    })
+    .join("");
+
+  document.getElementById("reportCommitted").innerHTML =
+    `<table class="w-full text-sm">
+      <thead>
+        <tr class="text-left border-b">
+          <th class="py-2">Date</th>
+          <th>Earmark</th>
+          <th>Project/Event</th>
+          <th>Account</th>
+          <th>Type</th>
+          <th>Amount</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="6" class="py-3 text-slate-500">No earmarked or event-tied transactions found.</td></tr>'}</tbody>
+    </table>`;
+}
+
+/* ========= Add/Edit/Delete handlers ========= */
+document.getElementById("eventForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const f = e.target;
+  state.events.push({ id: uid(), name: f.name.value.trim(), type: f.type.value.trim(), date: f.date.value, notes: f.notes.value.trim() });
+  f.reset();
+  renderAll();
+});
+
+document.getElementById("eventsTbody").addEventListener("click", e => {
+  const id = e.target.getAttribute("data-id");
+  if (!id) return;
+  if (e.target.classList.contains("del-event")){
+    state.events = state.events.filter(x=>x.id!==id);
+    for (const t of state.transactions) if (t.eventId===id) t.eventId = "";
+    renderAll();
+  } else if (e.target.classList.contains("edit-event-note")){
+    const ev = byId(state.events, id);
+    if (!ev) return;
+    const updated = prompt(`Edit notes for "${ev.name}"`, ev.notes || "");
+    if (updated !== null) {
+      ev.notes = updated.trim();
+      renderAll();
+    }
+  }
+});
+
+document.getElementById("txnForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const f = e.target;
+  state.transactions.push({
+    id: uid(),
+    date: f.date.value,
+    desc: f.desc.value.trim(),
+    kind: f.kind.value,
+    amount: Number(f.amount.value||0),
+    account: f.account.value,
+    eventId: f.eventId.value,
+    earmarkId: f.earmarkId.value,
+    category: f.category.value.trim()
+  });
+  f.reset();
+  renderAll();
+});
+
+document.getElementById("txnsTbody").addEventListener("click", e => {
+  const id = e.target.getAttribute("data-id");
+  if (!id && !e.target.classList.contains("cancel-edit")) return;
+
+  if (e.target.classList.contains("del-txn")){
+    const delId = id;
+    state.transactions = state.transactions.filter(x=>x.id!==delId);
+    renderAll();
+    return;
+  }
+
+  if (e.target.classList.contains("edit-txn")){
+    const t = byId(state.transactions, id);
+    if (!t) return;
+
+    const tr = e.target.closest("tr");
+    tr.innerHTML = `
+      <td class="py-2"><input type="date" class="px-2 py-1 border rounded w-36" value="${t.date||""}"></td>
+      <td>
+        <select class="px-2 py-1 border rounded">
+          <option value="INCOME" ${t.kind==="INCOME"?"selected":""}>INCOME</option>
+          <option value="COST" ${t.kind==="COST"?"selected":""}>COST</option>
+        </select>
+      </td>
+      <td><input type="number" step="0.01" class="px-2 py-1 border rounded w-28" value="${Number(t.amount||0)}"></td>
+      <td><input type="text" class="px-2 py-1 border rounded w-56" value="${(t.desc||"").replace(/"/g,'&quot;')}"></td>
+      <td>
+        <select class="px-2 py-1 border rounded w-48">${eventOptionsHTML(t.eventId||"")}</select>
+      </td>
+      <td>
+        <select class="px-2 py-1 border rounded w-56">${earmarkOptionsHTML(t.earmarkId||"")}</select>
+      </td>
+      <td><input type="text" class="px-2 py-1 border rounded w-40" value="${(t.category||"").replace(/"/g,'&quot;')}"></td>
+      <td class="whitespace-normal break-words flex flex-wrap gap-3 py-2">
+        <button data-id="${t.id}" class="save-txn text-green-700">Save</button>
+        <button data-id="${t.id}" class="cancel-edit text-slate-600">Cancel</button>
+      </td>
+    `;
+    return;
+  }
+
+  if (e.target.classList.contains("save-txn")){
+    const t = byId(state.transactions, id);
+    if (t) {
+      const tr = e.target.closest("tr");
+      const [dateEl, kindEl, amtEl, descEl, eventSel, earmarkSel, catEl] = tr.querySelectorAll("input, select");
+      t.date = dateEl.value || "";
+      t.kind = kindEl.value;
+      t.amount = Number(amtEl.value || 0);
+      t.desc = descEl.value.trim();
+      t.eventId = eventSel.value || "";
+      t.earmarkId = earmarkSel.value || "";
+      t.category = catEl.value.trim();
+    }
+    renderAll();
+    return;
+  }
+
+  if (e.target.classList.contains("cancel-edit")){
+    renderAll();
+    return;
+  }
+});
+
+document.getElementById("earmarkForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const f = e.target;
+  state.earmarks.push({ id: uid(), name: f.name.value.trim(), month: f.month.value.trim(), year: f.year.value.trim(), notes: f.notes.value.trim() });
+  f.reset();
+  renderAll();
+});
+
+document.getElementById("earmarksTbody").addEventListener("click", e => {
+  const id = e.target.getAttribute("data-id");
+  if (!id) return;
+  if (e.target.classList.contains("del-earmark")){
+    state.earmarks = state.earmarks.filter(x=>x.id!==id);
+    for (const t of state.transactions) if (t.earmarkId===id) t.earmarkId = "";
+    renderAll();
+  } else if (e.target.classList.contains("edit-earmark-note")){
+    const em = byId(state.earmarks, id);
+    if (!em) return;
+    const updated = prompt(`Edit notes for "${em.name}"`, em.notes || "");
+    if (updated !== null) {
+      em.notes = updated.trim();
+      renderAll();
+    }
+  }
+});
+
+
+/* ========= Events CSV ========= */
+document.getElementById("parseEvents")?.addEventListener("click", () => {
+  const fileInput = document.getElementById("eventFile");
+  if (!fileInput) return alert("Events CSV input not found on the page.");
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return alert("Choose an events CSV first.");
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = new Uint8Array(reader.result);
+      const wb = XLSX.read(data, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      let imported = 0;
+      for (const r of rows) {
+        const name = String(r["Name"] || r["Event"] || r["Title"] || "").trim();
+        if (!name) continue;
+        const type = String(r["Type"] || r["type"] || "").trim();
+        const rawDate = String(r["Date"] || r["date"] || "").trim();
+        const notes = String(r["Notes"] || r["notes"] || "").trim();
+
+        let dateISO = "";
+        if (rawDate) {
+          const d1 = DateTime.fromFormat(rawDate, "M/d/yyyy");
+          if (d1.isValid) dateISO = d1.toISODate();
+          else {
+            const d2 = DateTime.fromISO(rawDate);
+            dateISO = d2.isValid ? d2.toISODate() : "";
+          }
+        }
+
+        state.events.push({ id: uid(), name, type, date: dateISO, notes });
+        imported++;
+      }
+      renderAll();
+      alert(`Imported ${imported} event${imported===1?"":"s"}.`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse CSV. Make sure it is a valid CSV file.");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+/* ========= Earmarks CSV ========= */
+
+document.getElementById("parseEarmarks")?.addEventListener("click", () => {
+  const fileInput = document.getElementById("earmarkFile");
+  if (!fileInput) return alert("Earmarks CSV input not found on the page.");
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return alert("Choose an earmarks CSV first.");
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = new Uint8Array(reader.result);
+      const wb = XLSX.read(data, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      // defval keeps empty strings where cells are blank
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      // Flexible header mapping
+      const monthNames = {
+        jan: 1, january: 1,
+        feb: 2, february: 2,
+        mar: 3, march: 3,
+        apr: 4, april: 4,
+        may: 5,
+        jun: 6, june: 6,
+        jul: 7, july: 7,
+        aug: 8, august: 8,
+        sep: 9, sept: 9, september: 9,
+        oct: 10, october: 10,
+        nov: 11, november: 11,
+        dec: 12, december: 12
+      };
+
+      let imported = 0;
+      for (const r of rows) {
+        // Normalized access (support multiple header names)
+        const get = (keys, fallback="") => {
+          for (const k of keys) {
+            if (Object.prototype.hasOwnProperty.call(r, k)) {
+              const v = String(r[k] ?? "").trim();
+              if (v) return v;
+            }
+          }
+          return fallback;
+        };
+
+        const name = get(["(YEAR)+Name","(year)+name","Name","Earmark"]);
+        if (!name) continue;
+
+        let month = get(["Month","month"]);
+        if (month) {
+          const n = Number(month);
+          if (!Number.isNaN(n) && n >= 1 && n <= 12) {
+            month = String(n);
+          } else {
+            const key = month.toLowerCase();
+            month = monthNames[key] ? String(monthNames[key]) : "";
+          }
+        }
+
+        let year = get(["Year","year"]);
+        if (year) {
+          const y = Number(year);
+          year = (!Number.isNaN(y) && y >= 1900 && y <= 3000) ? String(y) : "";
+        }
+
+        // Accept "Balance" but store it in notes (balances are computed from transactions)
+        const balance = get(["Balance","balance"]);
+        const notesRaw = get(["Notes (including proposed budgets)","Notes","notes"]);
+        const notes = [notesRaw, balance ? `(Initial amount: ${balance})` : ""].filter(Boolean).join(" | ");
+
+        state.earmarks.push({ id: uid(), name, month, year, notes });
+        imported++;
+      }
+
+      renderAll();
+      alert(`Imported ${imported} earmark${imported===1?"":"s"}.`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse CSV. Make sure it is a valid CSV file.");
+    }
+  };
+  // Read as ArrayBuffer so XLSX can parse CSV with quoted commas
+  reader.readAsArrayBuffer(file);
+});
+
+/* ========= Bank CSV ========= */
+
+document.getElementById("parseBank").addEventListener("click", e => {
+  const file = document.getElementById("bankFile").files[0];
+  if (!file) return alert("Choose a CSV first.");
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = reader.result;
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const rows = lines.map(line => line.split(","));
+    const header = rows.shift().map(h=>h.trim().toLowerCase());
+    const idxDate = header.findIndex(h=> /date/.test(h));
+    const idxDesc = header.findIndex(h=> /desc|memo|name|payee/i.test(h));
+    const idxAmt = header.findIndex(h=> /amount|amt/i.test(h));
+    const idxDebit = header.findIndex(h=> /debit/i.test(h));
+    const idxCredit = header.findIndex(h=> /credit/i.test(h));
+
+    const queue = [];
+    for (const r of rows) {
+      const rawDate = r[idxDate] || "";
+      const parsedDate = DateTime.fromFormat(rawDate.trim(), "M/d/yyyy").isValid ?
+        DateTime.fromFormat(rawDate.trim(), "M/d/yyyy").toISODate() :
+        DateTime.fromISO(rawDate.trim()).toISODate();
+      const desc = (r[idxDesc]||"").trim();
+      let amt = 0;
+      if (idxAmt >= 0 && r[idxAmt]) amt = Number(r[idxAmt]);
+      else if (idxDebit>=0 || idxCredit>=0){
+        const debit = idxDebit>=0 ? Number(r[idxDebit]||0) : 0;
+        const credit = idxCredit>=0 ? Number(r[idxCredit]||0) : 0;
+        amt = credit - debit;
+      }
+      queue.push({ id: uid(), date: parsedDate, desc, amount: amt });
+    }
+    state.bankQueue = queue;
+    renderBankQueue();
+  };
+  reader.readAsText(file);
+});
+
+function renderBankQueue(){
+  const tbody = document.getElementById("bankTbody");
+  tbody.innerHTML = state.bankQueue.map(line => {
+    return `<tr class="border-b">
+      <td class="py-2">${line.date||""}</td>
+      <td>${line.desc||""}</td>
+      <td>${money(line.amount)}</td>
+      <td>
+        <select data-id="${line.id}" class="assign-event px-2 py-1 border rounded">
+          <option value="">(no event)</option>
+          ${state.events.map(e=>`<option value="${e.id}">${e.name}</option>`).join("")}
+        </select>
+      </td>
+      <td>
+        <select data-id="${line.id}" class="assign-account px-2 py-1 border rounded">
+          <option value="Checking">Checking</option>
+          <option value="Savings">Savings</option>
+          <option value="Venmo">Venmo</option>
+          <option value="PayPal">PayPal</option>
+        </select>
+      </td>
+      <td>
+        <select data-id="${line.id}" class="assign-kind px-2 py-1 border rounded">
+          <option value="${line.amount>=0 ? "INCOME":"COST"}">${line.amount>=0 ? "INCOME":"COST"}</option>
+          <option value="${line.amount>=0 ? "COST":"INCOME"}">${line.amount>=0 ? "COST":"INCOME"}</option>
+        </select>
+      </td>
+      <td><button class="commit-line px-2 py-1 border rounded" data-id="${line.id}">Commit</button></td>
+    </tr>`;
+  }).join("");
+}
+makeTablesSortable();
+
+document.getElementById("bankTbody").addEventListener("click", e => {
+  if (e.target.classList.contains("commit-line")){
+    const id = e.target.getAttribute("data-id");
+    const line = state.bankQueue.find(x=>x.id===id);
+    if (!line) return;
+    const evSel = document.querySelector(`select.assign-event[data-id="${id}"]`);
+    const kdSel = document.querySelector(`select.assign-kind[data-id="${id}"]`);
+    state.transactions.push({
+      id: uid(),
+      date: line.date,
+      desc: line.desc,
+      kind: kdSel.value,
+      amount: Math.abs(Number(line.amount||0)),
+      account: (document.querySelector(`select.assign-account[data-id="${id}"]`)?.value) || "Checking",
+      eventId: evSel.value || "",
+      earmarkId: "",
+      category: "BANK"
+    });
+    state.bankQueue = state.bankQueue.filter(x=>x.id!==id);
+    renderAll();
+    renderBankQueue();
+  }
+});
+
+/* ========= Export to Excel (FY Jul→Jun order) ========= */
+function buildProfitabilitySheet(fy){
+  const header = ["", "PROJECT","JUL","AUG","SEP","Q1 TOTAL","OCT","NOV","DEC","Q2 TOTAL","JAN","FEB","MAR","Q3 TOTAL","APR","MAY","JUN","Q4 TOTAL","YR TOTAL"];
+  const rows = [];
+  rows.push(header);
+
+  const events = [...state.events].sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+  const txnsFY = state.transactions.filter(t=> inFY(t.date, fy));
+
+  function totalsForEvent(eventId, kind){
+    const byM = new Array(12).fill(0);
+    for (const t of txnsFY) {
+      if ((eventId || "") !== (t.eventId || "")) continue;
+      if (t.kind !== kind) continue;
+      const idx = fyMonthIndex(t.date);
+      if (idx != null) byM[idx] += Number(t.amount||0);
+    }
+    const q1 = byM[0]+byM[1]+byM[2];
+    const q2 = byM[3]+byM[4]+byM[5];
+    const q3 = byM[6]+byM[7]+byM[8];
+    const q4 = byM[9]+byM[10]+byM[11];
+    const yr = q1+q2+q3+q4;
+    return { byM, q1, q2, q3, q4, yr };
+  }
+
+  function rowFromTotals(label, totals){
+    return [
+      "", label,
+      ...totals.byM.slice(0,3), totals.q1,
+      ...totals.byM.slice(3,6), totals.q2,
+      ...totals.byM.slice(6,9), totals.q3,
+      ...totals.byM.slice(9,12), totals.q4,
+      totals.yr
+    ];
+  }
+
+  for (const e of events) {
+    rows.push(["", e.name]);
+    const cost = totalsForEvent(e.id, "COST");
+    const inc  = totalsForEvent(e.id, "INCOME");
+    rows.push(rowFromTotals("COSTS", cost));
+    rows.push(rowFromTotals("INCOME", inc));
+    const gain = {
+      byM: inc.byM.map((v,i)=> v - cost.byM[i]),
+      q1: inc.q1 - cost.q1, q2: inc.q2 - cost.q2, q3: inc.q3 - cost.q3, q4: inc.q4 - cost.q4,
+      yr: inc.yr - cost.yr
+    };
+    rows.push(rowFromTotals("TOTAL GAIN", gain));
+  }
+
+  const anyNoEvent = txnsFY.some(t => !t.eventId);
+  if (anyNoEvent){
+    rows.push(["","(No Event)"]);
+    const cost = totalsForEvent("", "COST");
+    const inc  = totalsForEvent("", "INCOME");
+    rows.push(rowFromTotals("COSTS", cost));
+    rows.push(rowFromTotals("INCOME", inc));
+    const gain = {
+      byM: inc.byM.map((v,i)=> v - cost.byM[i]),
+      q1: inc.q1 - cost.q1, q2: inc.q2 - cost.q2, q3: inc.q3 - cost.q3, q4: inc.q4 - cost.q4,
+      yr: inc.yr - cost.yr
+    };
+    rows.push(rowFromTotals("TOTAL GAIN", gain));
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = 1; R <= range.e.r; ++R){
+    for (let C = 2; C <= range.e.c; ++C){
+      const cell = ws[XLSX.utils.encode_cell({r:R, c:C})];
+      if (cell) cell.z = "$#,##0.00";
+    }
+  }
+  return ws;
+}
+
+
+function buildAccountSummarySheet(fy){
+  const rows = [["Account","Deposits","Withdrawals","Net"]];
+  const fyTx = state.transactions.filter(t => inFY(t.date, fy));
+  const accounts = Array.from(new Set(fyTx.map(t => t.account || "(Unspecified)")));
+  for (const ac of accounts){
+    const inc = fyTx.filter(t => (t.account||"(Unspecified)")===ac && t.kind==="INCOME").reduce((s,t)=> s+Number(t.amount||0), 0);
+    const out = fyTx.filter(t => (t.account||"(Unspecified)")===ac && t.kind==="COST").reduce((s,t)=> s+Number(t.amount||0), 0);
+    rows.push([ac, inc, out, inc - out]);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = 1; R <= range.e.r; ++R){
+    for (let C = 1; C <= 3; ++C){
+      const cell = ws[XLSX.utils.encode_cell({r:R, c:C})];
+      if (cell) cell.z = "$#,##0.00";
+    }
+  }
+  return ws;
+}
+
+function exportExcel(){
+  const fy = Number(state.fiscalYear);
+  const wb = XLSX.utils.book_new();
+  const ws = buildProfitabilitySheet(fy);
+  XLSX.utils.book_append_sheet(wb, ws, "CVMA Profitability (FY Jul-Jun)");
+  const ws2 = buildProfitabilitySheet(fy);
+  XLSX.utils.book_append_sheet(wb, ws2, " CVMA Profitability " + fy);
+  const wsAcct = buildAccountSummarySheet(fy);
+  XLSX.utils.book_append_sheet(wb, wsAcct, "By Account (FY)");
+  const fname = `CVMA_Profitability_${fy}_FY-Jul-Jun.xlsx`;
+  XLSX.writeFile(wb, fname);
+}
+
+/* ========= Import/Export JSON ========= */
+document.getElementById("btnExportJSON").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cvma_bookkeeper_backup_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("importJsonFile").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!obj || typeof obj !== "object") throw new Error("Invalid JSON");
+      state = obj;
+      state.fiscalYear = Number(state.fiscalYear) || new Date().getFullYear();
+      renderAll();
+      alert("Imported JSON and applied.");
+    } catch (err) {
+      alert("Invalid JSON file.");
+    }
+  };
+  reader.readAsText(file);
+});
+
+/* ========= Tabs & Controls ========= */
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(b=> b.classList.remove("active","bg-white"));
+    btn.classList.add("active","bg-white");
+    const key = btn.getAttribute("data-tab");
+    document.querySelectorAll(".tab-panel").forEach(p=> p.classList.add("hidden"));
+    document.getElementById("tab-"+key).classList.remove("hidden");
+  });
+});
+
+document.getElementById("btnExport").addEventListener("click", exportExcel);
+document.getElementById("btnPrint").addEventListener("click", ()=> window.print());
+document.getElementById("fyInput").addEventListener("change", e => { state.fiscalYear = Number(e.target.value||new Date().getFullYear()); renderAll(); autosave(); });
+document.getElementById("saveAll").addEventListener("click", () => save(true));
+document.getElementById("loadAll").addEventListener("click", () => load(true));
+document.getElementById("clearAll").addEventListener("click", resetAll);
+document.getElementById("acctFilter")?.addEventListener("change", e => { state.filterAccount = e.target.value || ""; renderAll(); autosave(); });
+
+
+/* ========= Seed or Load ========= */
+(function boot(){
+  // Try to load any previously saved data automatically (no alert)
+  if (!load(false)) {
+    // Only seed if nothing exists
+    state.fiscalYear = new Date().getFullYear();
+    const seedEvents = [
+      "Poker Run","Gun Raffle","Hockey Chuck-a-Puck","Rush Hockey Jerseys","Patches & Coins",
+      "Pub Crawls","Beer Sales","Pizza Ranch Fundraiser","Other Fundraiser"
+    ];
+    for (const name of seedEvents) state.events.push({ id: uid(), name, type:"Fundraiser", date:"", notes:"" });
+
+    const seedEarmarks = [
+      "Veteran’s Helping Hands","Senior Living Gift Bags","Veteran Fence Project",
+      "Curley Assistance","Auxiliary Scholarship Fund","South Dakota Service Dogs",
+      "Project Healing Waters Fly Fishing","Jacob Bourne Benefit","DAV Chapter #3","Boots on the Ground"
+    ];
+    for (const name of seedEarmarks) state.earmarks.push({ id: uid(), name, notes: "" });
+
+    renderAll();
+    autosave();
+  }
+})();
+
+/* ========= Sorting ========= */
+function parseAsDateOrNumber(text) {
+  const s = (text || "").trim();
+  if (!s) return { type: "text", value: "" };
+  const num = parseFloat(s.replace(/[^0-9.\-]/g, ""));
+  if (!Number.isNaN(num) && /[0-9]/.test(s)) return { type: "number", value: num };
+  const dISO = luxon.DateTime.fromISO(s);
+  if (dISO.isValid) return { type: "date", value: dISO.toMillis() };
+  const dMDY = luxon.DateTime.fromFormat(s, "M/d/yyyy");
+  if (dMDY.isValid) return { type: "date", value: dMDY.toMillis() };
+  return { type: "text", value: s.toLowerCase() };
+}
+
+function makeTablesSortable() {
+  document.querySelectorAll("table").forEach(table => {
+    const headers = table.querySelectorAll("thead th");
+    if (!headers.length) return;
+    headers.forEach((th, colIndex) => {
+      th.style.cursor = "pointer";
+      th.title = "Click to sort";
+      th.addEventListener("click", () => {
+        const tbody = table.querySelector("tbody");
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        const asc = th.dataset.sortAsc !== "true";
+        headers.forEach(h => { h.dataset.sortAsc = ""; h.classList.remove("sorted-asc","sorted-desc"); });
+
+        rows.sort((a, b) => {
+          const aCell = a.children[colIndex]?.textContent || "";
+          const bCell = b.children[colIndex]?.textContent || "";
+          const A = parseAsDateOrNumber(aCell);
+          const B = parseAsDateOrNumber(bCell);
+
+          const typeRank = { date: 0, number: 1, text: 2 };
+          if (A.type !== B.type) return asc ? typeRank[A.type] - typeRank[B.type] : typeRank[B.type] - typeRank[A.type];
+          if (A.type === "date" || A.type == "number") return asc ? (A.value - B.value) : (B.value - A.value);
+          return asc ? String(A.value).localeCompare(String(B.value)) : String(B.value).localeCompare(String(A.value));
+        });
+
+        tbody.innerHTML = "";
+        rows.forEach(r => tbody.appendChild(r));
+
+        th.dataset.sortAsc = String(asc);
+        th.classList.add(asc ? "sorted-asc" : "sorted-desc");
+      });
+    });
+  });
+}
+
+// Inline select options
+function eventOptionsHTML(selected=""){
+  return `<option value="">(no event)</option>` +
+    state.events.map(e => `<option value="${e.id}" ${e.id===selected?'selected':''}>${e.name}</option>`).join("");
+}
+function earmarkOptionsHTML(selected=""){
+  return `<option value="">(no earmark)</option>` +
+    state.earmarks.map(e => `<option value="${e.id}" ${e.id===selected?'selected':''}>${e.name}</option>`).join("");
+}
+</script>
+</body>
+</html>
