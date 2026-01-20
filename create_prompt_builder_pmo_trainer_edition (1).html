@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CREATE Prompt Builder — PMO Trainer Edition</title>
+  <style>
+    :root {
+      --bg: #0f172a;          /* slate-900 */
+      --panel: #111827;       /* gray-900 */
+      --card: #0b1220;        /* deep slate */
+      --ink: #e5e7eb;         /* gray-200 */
+      --muted: #9ca3af;       /* gray-400 */
+      --primary: #60a5fa;     /* blue-400 */
+      --accent: #22d3ee;      /* cyan-400 */
+      --ok: #34d399;          /* emerald-400 */
+      --warn: #f59e0b;        /* amber-500 */
+      --err: #f87171;         /* red-400 */
+      --radius: 16px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.25);
+      --shadow-md: 0 10px 30px rgba(0,0,0,.35);
+      --shadow-lg: 0 30px 60px rgba(0,0,0,.45);
+      font-synthesis-weight: none;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: linear-gradient(180deg, #0b1220, var(--bg)); color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji";
+      letter-spacing: .2px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: 1200px; margin: 24px auto; padding: 0 16px;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      margin-bottom: 16px;
+    }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .logo { width:36px; height:36px; border-radius:50%; background: radial-gradient(circle at 30% 30%, var(--accent), transparent 60%), radial-gradient(circle at 70% 70%, var(--primary), transparent 60%), linear-gradient(135deg, #1f2937, #0b1220); box-shadow: var(--shadow-md); }
+    h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing:.3px; }
+    .sub { color: var(--muted); font-size: 12px; }
+
+    .grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 16px; }
+    @media (max-width: 980px){ .grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,.06);
+      border-radius: var(--radius); box-shadow: var(--shadow-sm);
+    }
+    .card h2 { font-size: 14px; margin: 0; padding: 16px; border-bottom: 1px solid rgba(255,255,255,.06); color: #dbeafe; letter-spacing:.25px; }
+    .card .body { padding: 16px; }
+
+    .section { display:grid; gap:12px; margin-bottom: 12px; }
+    .row { display:grid; gap:12px; grid-template-columns: 1fr 1fr; }
+    .row-3 { display:grid; gap:12px; grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 760px){ .row, .row-3 { grid-template-columns: 1fr; } }
+
+    label { font-size: 12px; color: var(--muted); display:flex; align-items:center; gap:8px; }
+    .hint { color: var(--muted); font-size: 11px; }
+    input[type="text"], textarea, select, input[type="number"]{
+      width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,0.04); color: var(--ink);
+      outline: none; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow .15s ease, border-color .15s ease, background .15s ease;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { border-color: rgba(96,165,250,.55); box-shadow: 0 0 0 3px rgba(96,165,250,.15); background: rgba(255,255,255,0.06); }
+
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:rgba(96,165,250,.15); border:1px solid rgba(96,165,250,.35); color:#bfdbfe; font-size:11px; }
+
+    .actions { display:flex; flex-wrap: wrap; gap:8px; align-items:center; }
+    .btn {
+      appearance:none; border:1px solid rgba(255,255,255,.1); background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+      color: var(--ink); padding: 10px 14px; border-radius: 12px; font-weight:600; cursor:pointer; transition: transform .05s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    .btn:hover { border-color: rgba(255,255,255,.22); box-shadow: var(--shadow-md); }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: linear-gradient(180deg, rgba(34,211,238,.25), rgba(34,211,238,.12)); border-color: rgba(34,211,238,.5); color: #e0f2fe; }
+    .btn.good { background: linear-gradient(180deg, rgba(52,211,153,.25), rgba(52,211,153,.12)); border-color: rgba(52,211,153,.5); color: #dcfce7; }
+    .btn.warn { background: linear-gradient(180deg, rgba(245,158,11,.25), rgba(245,158,11,.12)); border-color: rgba(245,158,11,.5); color: #fffbeb; }
+    .btn.bad { background: linear-gradient(180deg, rgba(248,113,113,.25), rgba(248,113,113,.12)); border-color: rgba(248,113,113,.5); color: #fee2e2; }
+
+    .preview {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      background: #0a0f1a; border-radius: var(--radius); border:1px solid rgba(255,255,255,.08);
+      padding: 16px; white-space: pre-wrap; min-height: 240px; color:#e2e8f0;
+    }
+
+    .meter { display:flex; align-items:center; gap:8px; color: var(--muted); font-size: 11px; }
+    .meter-bar { flex: 1; height: 8px; background: rgba(255,255,255,.08); border-radius:999px; overflow:hidden; }
+    .meter-bar > i { display:block; height:100%; width:0%; background: linear-gradient(90deg, var(--primary), var(--accent)); }
+
+    .example-list { display:grid; gap:8px; }
+    .criteria-list { display:grid; gap:8px; }
+    .rowline { display:flex; gap:8px; }
+    .rowline input[type="text"] { flex: 1; }
+
+    footer { margin-top: 18px; color: var(--muted); font-size: 11px; text-align:center; }
+    .kbd { font: 600 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>CREATE Prompt Builder — PMO Trainer Edition</h1>
+          <div class="sub">Build high‑quality prompts outside the AI tool using the <span class="pill">C</span>ontext <span class="pill">R</span>ole <span class="pill">E</span>xamples <span class="pill">A</span>sk <span class="pill">T</span>one <span class="pill">E</span>valuate framework.</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btnReset" title="Clear all fields">
+          Reset
+        </button>
+        <button class="btn" id="btnExport" title="Export worksheet to JSON">Export JSON</button>
+        <label class="btn" for="fileImport" title="Import a worksheet JSON">Import JSON<input id="fileImport" type="file" accept="application/json" style="display:none"></label>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- Left: Worksheet -->
+      <section class="card" aria-labelledby="ws-title">
+        <h2 id="ws-title">Worksheet</h2>
+        <div class="body">
+          <!-- Context -->
+          <div class="section">
+            <div class="row">
+              <div>
+                <label for="contextSituation">Context — Define the situation</label>
+                <textarea id="contextSituation" placeholder="Describe the current situation or problem that needs addressing. Example: We are facing delays in project delivery due to inefficient resource allocation."></textarea>
+              </div>
+              <div>
+                <label for="contextPurpose">Context — Purpose</label>
+                <textarea id="contextPurpose" placeholder="What is the goal of using AI in this context? Example: To optimize resource allocation and improve project timelines."></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Role -->
+          <div class="section">
+            <label for="role">Role — Identify the role of AI</label>
+            <input id="role" type="text" placeholder="e.g., AI acts as a PMO analyst that analyzes resource usage data to identify inefficiencies." />
+          </div>
+
+          <!-- Examples -->
+          <div class="section">
+            <div class="row" style="align-items:end;">
+              <div>
+                <label>Examples — Provide concrete scenarios</label>
+              </div>
+              <div class="actions" style="justify-content:flex-end;">
+                <button class="btn" id="addExample">+ Add example</button>
+              </div>
+            </div>
+            <div id="examples" class="example-list"></div>
+          </div>
+
+          <!-- Ask -->
+          <div class="section">
+            <label for="ask">Ask — Formulate the request</label>
+            <textarea id="ask" placeholder="Clearly state what you want AI to do. Example: Analyze current resource allocation across teams and suggest improvements for the next sprint and the quarterly plan."></textarea>
+          </div>
+
+          <!-- Tone -->
+          <div class="section">
+            <div class="row">
+              <div>
+                <label for="tone">Tone — Set the tone</label>
+                <select id="tone">
+                  <option value="Collaborative, solution‑focused">Collaborative, solution‑focused</option>
+                  <option value="Professional and concise">Professional and concise</option>
+                  <option value="Coaching and encouraging">Coaching and encouraging</option>
+                  <option value="Analytical and data‑driven">Analytical and data‑driven</option>
+                  <option value="Executive summary">Executive summary</option>
+                  <option value="Custom">Custom…</option>
+                </select>
+              </div>
+              <div>
+                <label for="toneCustom">Custom tone (if selected)</label>
+                <input id="toneCustom" type="text" placeholder="e.g., Direct and action‑oriented with minimal jargon" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Evaluate -->
+          <div class="section">
+            <div class="row" style="align-items:end;">
+              <div>
+                <label>Evaluate — Criteria & weights (optional)</label>
+                <div class="hint">Define how the results will be evaluated. Add criteria such as: impact on timeline, cost savings, feasibility, risk, stakeholder alignment.</div>
+              </div>
+              <div class="actions" style="justify-content:flex-end;">
+                <button class="btn" id="addCrit">+ Add criterion</button>
+              </div>
+            </div>
+            <div id="criteria" class="criteria-list"></div>
+          </div>
+
+          <!-- Metadata -->
+          <div class="section">
+            <div class="row-3">
+              <div>
+                <label for="constraints">Constraints (optional)</label>
+                <input id="constraints" type="text" placeholder="e.g., 300 words max; cite data sources; use bullet points"/>
+              </div>
+              <div>
+                <label for="audience">Audience (optional)</label>
+                <input id="audience" type="text" placeholder="e.g., PMO Leadership; Scrum Masters; Executive sponsor"/>
+              </div>
+              <div>
+                <label for="format">Preferred output format (optional)</label>
+                <input id="format" type="text" placeholder="e.g., Markdown with headings; CSV table; JSON with fields X, Y, Z"/>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-top:6px; gap:12px;">
+            <button class="btn primary" id="btnCopy">Copy Prompt</button>
+            <button class="btn good" id="btnDownload">Download .txt</button>
+            <span class="meter" title="Approximate tokens (4 chars ≈ 1 token)">
+              <span>Length</span>
+              <span class="meter-bar"><i id="meter"></i></span>
+              <span id="chars">0 chars</span>
+              <span>·</span>
+              <span id="tokens">~0 tokens</span>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Live Prompt Preview -->
+      <aside class="card" aria-labelledby="pv-title">
+        <h2 id="pv-title">Live Prompt Preview</h2>
+        <div class="body">
+          <div id="preview" class="preview" aria-live="polite"></div>
+          <div class="hint" style="margin-top:10px;">Tip: After copying, paste directly into your AI tool. Use <span class="kbd">Ctrl/Cmd + K</span> to search your doc for sections if you edit later.</div>
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      Built for PMO trainers to operationalize AI usage with the CREATE method. Autosaves locally.
+    </footer>
+  </div>
+
+  <script>
+    // ---- State & Utilities ----
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const LS_KEY = 'create-prompt-builder-v1';
+
+    const state = {
+      contextSituation: '',
+      contextPurpose: '',
+      role: '',
+      examples: ['AI can suggest reallocation of resources based on historical data trends.'],
+      ask: '',
+      tone: 'Collaborative, solution‑focused',
+      toneCustom: '',
+      criteria: [
+        { text: 'Impact on project timeline', weight: 3 },
+        { text: 'Estimated cost savings', weight: 2 }
+      ],
+      constraints: 'Keep it under 300 words. Use bullet points where helpful.',
+      audience: 'PMO team and Scrum Masters',
+      format: 'Markdown with headings and a summary table'
+    };
+
+    function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+    function load(){
+      try { const raw = localStorage.getItem(LS_KEY); if(!raw) return; const obj = JSON.parse(raw); Object.assign(state, obj); }
+      catch(e){ console.warn('No saved state', e); }
+    }
+
+    function elExample(value=''){
+      const wrap = document.createElement('div');
+      wrap.className = 'rowline';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = 'Example scenario…';
+      inp.value = value;
+      const del = document.createElement('button');
+      del.className = 'btn bad';
+      del.textContent = 'Remove';
+      del.addEventListener('click', () => { wrap.remove(); syncExamplesFromDOM(); render(); save(); });
+      inp.addEventListener('input', () => { syncExamplesFromDOM(); render(); save(); });
+      wrap.appendChild(inp); wrap.appendChild(del);
+      return wrap;
+    }
+
+    function elCriterion(text='', weight=1){
+      const wrap = document.createElement('div');
+      wrap.className = 'rowline';
+
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = 'Criterion (e.g., Feasibility of implementation)';
+      inp.value = text;
+
+      const num = document.createElement('input');
+      num.type = 'number'; num.min = '1'; num.max = '5'; num.step = '1';
+      num.value = weight;
+      num.style.width = '90px';
+
+      const del = document.createElement('button');
+      del.className = 'btn bad';
+      del.textContent = 'Remove';
+
+      const onChange = () => { syncCriteriaFromDOM(); render(); save(); };
+      inp.addEventListener('input', onChange);
+      num.addEventListener('input', onChange);
+      del.addEventListener('click', () => { wrap.remove(); syncCriteriaFromDOM(); render(); save(); });
+
+      wrap.appendChild(inp);
+      wrap.appendChild(num);
+      wrap.appendChild(del);
+      return wrap;
+    }
+
+    function syncExamplesFromDOM(){
+      state.examples = $$('#examples .rowline input[type="text"]').map(i => i.value).filter(Boolean);
+    }
+
+    function syncCriteriaFromDOM(){
+      state.criteria = $$('#criteria .rowline').map(row => {
+        const [t, n] = row.querySelectorAll('input');
+        return { text: t.value, weight: Number(n.value || 1) };
+      }).filter(c => c.text.trim());
+    }
+
+    function assemblePrompt(){
+      const tone = (state.tone === 'Custom' && state.toneCustom.trim()) ? state.toneCustom.trim() : state.tone;
+      const examples = state.examples.length ? state.examples.map((e,i)=>`- ${e}`).join('\n') : '- N/A';
+      const criteria = state.criteria.length ? state.criteria.map(c=>`- ${c.text} (weight ${c.weight})`).join('\n') : '- Relevance and clarity';
+      const constraints = state.constraints?.trim() ? `\n\nConstraints:\n- ${state.constraints}` : '';
+      const audience = state.audience?.trim() ? `\n\nAudience:\n- ${state.audience}` : '';
+      const format = state.format?.trim() ? `\n\nPreferred Output Format:\n- ${state.format}` : '';
+
+      return (
+`AI Prompt — Using the CREATE Method\n\n`+
+`Context\n`+
+`- Situation: ${state.contextSituation || 'N/A'}\n`+
+`- Purpose: ${state.contextPurpose || 'N/A'}\n\n`+
+`Role\n`+
+`- ${state.role || 'N/A'}\n\n`+
+`Examples\n${examples}\n\n`+
+`Ask\n`+
+`${state.ask || 'N/A'}\n\n`+
+`Tone\n`+
+`- ${tone}\n\n`+
+`Evaluate\n${criteria}`+
+constraints+
+audience+
+format+
+`\n\nSummary\n`+
+`This prompt uses CREATE (Context, Role, Examples, Ask, Tone, Evaluate) to guide AI toward actionable, PMO‑ready outputs.`);
+    }
+
+    function render(){
+      $('#contextSituation').value = state.contextSituation;
+      $('#contextPurpose').value = state.contextPurpose;
+      $('#role').value = state.role;
+      $('#ask').value = state.ask;
+      $('#tone').value = state.tone;
+      $('#toneCustom').value = state.toneCustom;
+      $('#constraints').value = state.constraints || '';
+      $('#audience').value = state.audience || '';
+      $('#format').value = state.format || '';
+
+      // examples
+      const exHost = $('#examples'); exHost.innerHTML = '';
+      (state.examples.length ? state.examples : ['']).forEach(v => exHost.appendChild(elExample(v)));
+
+      // criteria
+      const crHost = $('#criteria'); crHost.innerHTML = '';
+      (state.criteria.length ? state.criteria : [{text:'', weight:1}]).forEach(c => crHost.appendChild(elCriterion(c.text, c.weight)));
+
+      // preview content & meters
+      const text = assemblePrompt();
+      $('#preview').textContent = text;
+      const chars = text.length; $('#chars').textContent = `${chars.toLocaleString()} chars`;
+      const tokens = Math.max(1, Math.round(chars / 4));
+      $('#tokens').textContent = `~${tokens.toLocaleString()} tokens`;
+      const pct = Math.min(100, Math.round((chars / 3000) * 100));
+      $('#meter').style.width = `${pct}%`;
+    }
+
+    function bind(){
+      // inputs
+      $('#contextSituation').addEventListener('input', e => { state.contextSituation = e.target.value; render(); save(); });
+      $('#contextPurpose').addEventListener('input', e => { state.contextPurpose = e.target.value; render(); save(); });
+      $('#role').addEventListener('input', e => { state.role = e.target.value; render(); save(); });
+      $('#ask').addEventListener('input', e => { state.ask = e.target.value; render(); save(); });
+      $('#tone').addEventListener('change', e => { state.tone = e.target.value; render(); save(); });
+      $('#toneCustom').addEventListener('input', e => { state.toneCustom = e.target.value; render(); save(); });
+      $('#constraints').addEventListener('input', e => { state.constraints = e.target.value; render(); save(); });
+      $('#audience').addEventListener('input', e => { state.audience = e.target.value; render(); save(); });
+      $('#format').addEventListener('input', e => { state.format = e.target.value; render(); save(); });
+
+      // dynamic lists
+      $('#addExample').addEventListener('click', () => { $('#examples').appendChild(elExample('')); save(); });
+      $('#addCrit').addEventListener('click', () => { $('#criteria').appendChild(elCriterion('', 1)); save(); });
+
+      // actions
+      $('#btnCopy').addEventListener('click', async () => {
+        const text = assemblePrompt();
+        try { await navigator.clipboard.writeText(text); flash('Copied to clipboard'); }
+        catch(e){ fallbackCopy(text); flash('Copied (fallback)'); }
+      });
+
+      $('#btnDownload').addEventListener('click', () => {
+        const text = assemblePrompt();
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'CREATE_prompt.txt'; a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      $('#btnReset').addEventListener('click', () => { if(confirm('Clear all fields?')){ localStorage.removeItem(LS_KEY); window.location.reload(); } });
+
+      $('#btnExport').addEventListener('click', () => {
+        const json = JSON.stringify(state, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'CREATE_worksheet.json'; a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      $('#fileImport').addEventListener('change', (e) => {
+        const file = e.target.files?.[0]; if(!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try { const obj = JSON.parse(String(reader.result)); Object.assign(state, obj); save(); render(); flash('Worksheet imported'); }
+          catch(err){ alert('Invalid JSON file.'); }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    function flash(msg){
+      const n = document.createElement('div');
+      n.textContent = msg;
+      Object.assign(n.style, {
+        position:'fixed', insetInline:'auto 16px', insetBlock:'auto 16px', padding:'10px 14px', background:'rgba(34,211,238,.15)', border:'1px solid rgba(34,211,238,.45)', color:'#e0f2fe', borderRadius:'12px', boxShadow:'var(--shadow-md)', zIndex:9999
+      });
+      document.body.appendChild(n);
+      setTimeout(()=> n.remove(), 1600);
+    }
+
+    function fallbackCopy(text){
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    }
+
+    // boot
+    load();
+    bind();
+    render();
+  </script>
+</body>
+</html>
